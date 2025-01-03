@@ -1,10 +1,6 @@
 #include <EpollTimer.hpp>
-#include <atomic>
-#include <chrono>
-#include <cstdint>
-#include <memory>
-#include <optional>
 #include <gtest/gtest.h>
+
 #include <random>
 #include <thread>
 #include <vector>
@@ -26,7 +22,7 @@ int generateRandomNumber()
 {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(1, 5000);
+    std::uniform_int_distribution<> dist(1, 100);
     return dist(gen);
 }
 
@@ -67,7 +63,7 @@ TEST(EpollTimerTest, BasicSingleTask)
     sia::epoll::timer::EpollTimer timer;
     sia::epoll::timer::EpollTimerScheduler scheduler{timer};
 
-    EXPECT_TRUE(scheduler.schedule(std::chrono::seconds{1}, callback_on_timer, std::move(payload)) != nullptr);
+    EXPECT_TRUE(scheduler.schedule(std::chrono::seconds{1}, callback_on_timer, std::move(payload)).second != nullptr);
 
     timer.loopConsumeAll();
 
@@ -96,15 +92,15 @@ TEST(EpollTimerTest, BasicMultipleTask)
     sia::epoll::timer::EpollTimer timer;
     sia::epoll::timer::EpollTimerScheduler scheduler{timer};
 
-    auto proxy1 = scheduler.schedule(std::chrono::milliseconds{1}, callback_on_timer, std::move(payload1));
-    auto proxy2 = scheduler.schedule(std::chrono::milliseconds{1}, callback_on_timer, std::move(payload2));
-    auto proxy3 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload3));
-    auto proxy4 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload4));
+    auto result1 = scheduler.schedule(std::chrono::milliseconds{1}, callback_on_timer, std::move(payload1));
+    auto result2 = scheduler.schedule(std::chrono::milliseconds{1}, callback_on_timer, std::move(payload2));
+    auto result3 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload3));
+    auto result4 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload4));
 
-    EXPECT_TRUE(proxy1 != nullptr);
-    EXPECT_TRUE(proxy2 != nullptr);
-    EXPECT_TRUE(proxy3 != nullptr);
-    EXPECT_TRUE(proxy4 != nullptr);
+    EXPECT_TRUE(result1.second != nullptr);
+    EXPECT_TRUE(result2.second != nullptr);
+    EXPECT_TRUE(result3.second != nullptr);
+    EXPECT_TRUE(result4.second != nullptr);
 
     timer.loopConsumeAll();
 
@@ -161,33 +157,33 @@ TEST(EpollTimerTest, BasicMultipleTaskCancel)
     sia::epoll::timer::EpollTimer timer;
     sia::epoll::timer::EpollTimerScheduler scheduler{timer};
 
-    auto proxy3 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload3));
-    auto proxy4 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload4));
+    auto result3 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload3));
+    auto result4 = scheduler.schedule(std::chrono::milliseconds{2}, callback_on_timer, std::move(payload4));
 
-    auto proxy1 = scheduler.schedule(
+    auto result1 = scheduler.schedule(
         std::chrono::milliseconds{1},
         sia::epoll::timer::Callback{
-            [proxy3](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason reason)
+            [result3](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason reason)
             {
-                proxy3->cancelTimer();
+                result3.second->cancelTimer();
                 callback_on_timer(task, reason);
             }},
         std::move(payload1));
 
-    auto proxy2 = scheduler.schedule(
+    auto result2 = scheduler.schedule(
         std::chrono::milliseconds{1},
         sia::epoll::timer::Callback{
-            [proxy4](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason reason)
+            [result4](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason reason)
             {
-                proxy4->cancelTimer();
+                result4.second->cancelTimer();
                 callback_on_timer(task, reason);
             }},
         std::move(payload2));
 
-    EXPECT_TRUE(proxy1 != nullptr);
-    EXPECT_TRUE(proxy2 != nullptr);
-    EXPECT_TRUE(proxy3 != nullptr);
-    EXPECT_TRUE(proxy4 != nullptr);
+    EXPECT_TRUE(result1.second != nullptr);
+    EXPECT_TRUE(result2.second != nullptr);
+    EXPECT_TRUE(result3.second != nullptr);
+    EXPECT_TRUE(result4.second != nullptr);
 
     timer.loopConsumeAll();
 
@@ -237,16 +233,16 @@ TEST(EpollTimerTest, ComplexMultiThreadRandomTest)
             payload->m_test_data = test_data;
             auto duration = generateRandomNumber();
 
-            auto proxy =
+            auto result =
                 scheduler->schedule(std::chrono::milliseconds{duration}, callback_on_timer, std::move(payload));
 
-            EXPECT_TRUE(proxy != nullptr);
+            EXPECT_TRUE(result.second != nullptr);
 
             // Adding some extra complexity.
             //
             if (duration % 10 == 0)
             {
-                proxy->cancelTimer();
+                result.second->cancelTimer();
             }
         }
 
@@ -288,4 +284,91 @@ TEST(EpollTimerTest, ComplexMultiThreadRandomTest)
 
     timer.breakLoop();
     timer_thread.join();
+}
+
+TEST(EpollTimerTest, BasicSingleTaskTimeoutValidation)
+{
+    sia::epoll::timer::EpollTimer timer;
+    sia::epoll::timer::EpollTimerScheduler scheduler{timer};
+
+    TestData* test_data = new TestData();
+    auto payload = std::make_unique<TestPayload>();
+    payload->m_test_data = test_data;
+
+    auto result = scheduler.schedule(std::chrono::milliseconds{10}, callback_on_timer, std::move(payload), 0);
+
+    EXPECT_TRUE(result.first == sia::epoll::timer::Status::kSuccess);
+    EXPECT_TRUE(result.second != nullptr);
+
+    auto expiration = result.second->getExpiration();
+
+    timer.loopConsumeAll();
+
+    EXPECT_TRUE(test_data->m_timedout.value() >= expiration.value());
+
+    auto elapsed = test_data->m_timedout.value() - expiration.value();
+
+    constexpr std::chrono::nanoseconds tolerance{10 * 1000000};
+
+    EXPECT_TRUE(elapsed <= tolerance);
+}
+
+TEST(EpollTimerTest, BasicMultipleTaskTimeoutValidation)
+{
+    sia::epoll::timer::EpollTimer timer;
+    sia::epoll::timer::EpollTimerScheduler scheduler{timer};
+
+    struct TestDataPack
+    {
+        TestData* m_test_data;
+        std::chrono::milliseconds m_expire;
+    };
+
+    std::vector<TestDataPack> test_data_list;
+
+    auto schedule_timers = [&test_data_list, &scheduler]()
+    {
+        TestData* test_data = new TestData();
+        auto payload = std::make_unique<TestPayload>();
+        payload->m_test_data = test_data;
+
+        // auto timeout = generateRandomNumber();
+        std::int32_t timeout = 10;
+        auto result = scheduler.schedule(std::chrono::milliseconds{timeout}, callback_on_timer, std::move(payload), 0);
+
+        EXPECT_TRUE(result.first == sia::epoll::timer::Status::kSuccess);
+        EXPECT_TRUE(result.second != nullptr);
+
+        auto expiration = result.second->getExpiration();
+
+        EXPECT_TRUE(expiration.has_value());
+
+        test_data_list.push_back(TestDataPack{test_data, std::chrono::milliseconds{timeout}});
+    };
+
+    constexpr std::uint32_t kBatchSize = 10000;
+
+    // auto process_begin = std::chrono::steady_clock::now();
+    for (std::size_t i = 0; i < kBatchSize; ++i)
+    {
+        schedule_timers();
+        timer.clearPipe();
+    }
+    auto process_end = std::chrono::steady_clock::now();
+
+    timer.loopConsumeAll();
+
+    // If there is a heavy load on the system this tolerance may not be enough.
+    //
+    constexpr std::chrono::nanoseconds tolerance{10 * 1000000};  // 10ms tolerance.
+
+    for (auto& data : test_data_list)
+    {
+        EXPECT_TRUE(data.m_test_data->m_timedout.value().time_since_epoch() >= process_end.time_since_epoch());
+        auto effective_elapsed_time = data.m_test_data->m_timedout.value() - (process_end + data.m_expire);
+        // std::cout << effective_elapsed_time.count() << " vs " << (data.m_expire + tolerance).count() << '\n';
+        EXPECT_TRUE(effective_elapsed_time <= (data.m_expire + tolerance));
+
+        delete data.m_test_data;
+    }
 }

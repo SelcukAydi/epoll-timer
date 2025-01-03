@@ -2,6 +2,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
@@ -81,6 +82,18 @@ void TimerTaskProxy::detachTask()
 {
     std::scoped_lock<std::mutex> lock{m_lock};
     m_task = nullptr;
+}
+
+std::optional<std::chrono::steady_clock::time_point> TimerTaskProxy::getExpiration()
+{
+    std::scoped_lock<std::mutex> lock{m_lock};
+    
+    if (m_task != nullptr)
+    {
+        return m_task->getExpiration();
+    }
+
+    return std::nullopt;
 }
 
 EpollTimer::EpollTimer()
@@ -362,7 +375,8 @@ Status EpollTimer::addTimerTask(TimerTask* timer_task)
             // Otherwise count as serious problem and ignore this task.
             //
             status = Status::kFailure;
-            std::cerr << "ERROR: Could not be added the task. error_no:" << errno << " error_explain:" << strerror(errno) << '\n';
+            std::cerr << "ERROR: Could not be added the task. error_no:" << errno
+                      << " error_explain:" << strerror(errno) << '\n';
         }
     }
     // Partial write. We count this as failure for us.
@@ -408,9 +422,8 @@ void EpollTimer::clearPipe()
     }
 }
 
-std::shared_ptr<TimerTaskProxy> EpollTimerScheduler::schedule(
-    const TimerTask::TimePoint& time_point, const Callback& callback, std::unique_ptr<TimerTaskPayload> payload,
-    const std::optional<std::chrono::milliseconds>& backoff_timeout)
+Result EpollTimerScheduler::schedule(const TimerTask::TimePoint& time_point, const Callback& callback,
+                                     std::unique_ptr<TimerTaskPayload> payload, std::int64_t backoff_timeout_in_ms)
 {
     TimerTask* task = new TimerTask(time_point, callback, std::move(payload));
     auto proxy = task->getProxy();
@@ -419,13 +432,25 @@ std::shared_ptr<TimerTaskProxy> EpollTimerScheduler::schedule(
 
     if (status == Status::kSuccess)
     {
-        return proxy;
+        return {status, proxy};
     }
 
-    if (backoff_timeout.has_value())
+    if (backoff_timeout_in_ms < 0)
     {
-        std::chrono::steady_clock::time_point backoff_point =
-            std::chrono::steady_clock::now() + backoff_timeout.value();
+        Result result{status, proxy};
+
+        if (status != Status::kSuccess)
+        {
+            result.second = nullptr;
+        }
+
+        return result;
+    }
+
+    if (backoff_timeout_in_ms > 0)
+    {
+        std::chrono::milliseconds backoff_timeout{backoff_timeout_in_ms};
+        std::chrono::steady_clock::time_point backoff_point = std::chrono::steady_clock::now() + backoff_timeout;
 
         // Loop until the backoff or success or fail.
         //
@@ -437,11 +462,11 @@ std::shared_ptr<TimerTaskProxy> EpollTimerScheduler::schedule(
 
         if (status == Status::kSuccess)
         {
-            return proxy;
+            return {status, proxy};
         }
 
         delete task;
-        return nullptr;
+        return {status, nullptr};
     }
 
     // Loop forever until we successfully add this task or fail.
@@ -454,27 +479,25 @@ std::shared_ptr<TimerTaskProxy> EpollTimerScheduler::schedule(
 
     if (status == Status::kSuccess)
     {
-        return proxy;
+        return {status, proxy};
     }
 
     delete task;
-    return nullptr;
+    return {status, nullptr};
 }
 
-std::shared_ptr<TimerTaskProxy> EpollTimerScheduler::schedule(
-    const std::chrono::seconds& timeout, const Callback& callback, std::unique_ptr<TimerTaskPayload> payload,
-    const std::optional<std::chrono::milliseconds>& backoff_timeout)
+Result EpollTimerScheduler::schedule(const std::chrono::seconds& timeout, const Callback& callback,
+                                     std::unique_ptr<TimerTaskPayload> payload, std::int64_t backoff_timeout_in_ms)
 {
     TimerTask::TimePoint scheduled_timeout{std::chrono::steady_clock::now() + timeout};
-    return schedule(scheduled_timeout, callback, std::move(payload), backoff_timeout);
+    return schedule(scheduled_timeout, callback, std::move(payload), backoff_timeout_in_ms);
 }
 
-std::shared_ptr<TimerTaskProxy> EpollTimerScheduler::schedule(
-    const std::chrono::milliseconds& timeout, const Callback& callback, std::unique_ptr<TimerTaskPayload> payload,
-    const std::optional<std::chrono::milliseconds>& backoff_timeout)
+Result EpollTimerScheduler::schedule(const std::chrono::milliseconds& timeout, const Callback& callback,
+                                     std::unique_ptr<TimerTaskPayload> payload, std::int64_t backoff_timeout_in_ms)
 {
     TimerTask::TimePoint scheduled_timeout{std::chrono::steady_clock::now() + timeout};
-    return schedule(scheduled_timeout, callback, std::move(payload), backoff_timeout);
+    return schedule(scheduled_timeout, callback, std::move(payload), backoff_timeout_in_ms);
 }
 
 }  // namespace sia::epoll::timer

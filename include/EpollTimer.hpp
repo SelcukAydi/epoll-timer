@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <utility>
 
 namespace sia::epoll::timer
 {
@@ -51,6 +52,8 @@ struct TimerTaskProxy final
     {
         return m_payload;
     }
+
+    std::optional<std::chrono::steady_clock::time_point> getExpiration();
 
     friend struct EpollTimer;
     friend struct EpollTimerScheduler;
@@ -229,26 +232,25 @@ struct EpollTimer
     std::optional<std::chrono::steady_clock::time_point> m_to_be_expired;
 };
 
+using Result = std::pair<Status, std::shared_ptr<TimerTaskProxy>>;
+
 struct EpollTimerScheduler final
 {
     explicit EpollTimerScheduler(EpollTimer& epoll_timer) : m_epoll_timer{epoll_timer}
     {
     }
 
-    std::shared_ptr<TimerTaskProxy> schedule(
-        const TimerTask::TimePoint& time_point, const Callback& callback,
-        std::unique_ptr<TimerTaskPayload> payload = nullptr,
-        const std::optional<std::chrono::milliseconds>& backoff_timeout = std::nullopt);
+    Result schedule(const TimerTask::TimePoint& time_point, const Callback& callback,
+                                             std::unique_ptr<TimerTaskPayload> payload = nullptr,
+                                             std::int64_t backoff_timeout_in_ms = 0);
 
-    std::shared_ptr<TimerTaskProxy> schedule(
-        const std::chrono::seconds& timeout, const Callback& callback,
-        std::unique_ptr<TimerTaskPayload> payload = nullptr,
-        const std::optional<std::chrono::milliseconds>& backoff_timeout = std::nullopt);
+    Result schedule(const std::chrono::seconds& timeout, const Callback& callback,
+                                             std::unique_ptr<TimerTaskPayload> payload = nullptr,
+                                             std::int64_t backoff_timeout_in_ms = 0);
 
-    std::shared_ptr<TimerTaskProxy> schedule(
-        const std::chrono::milliseconds& timeout, const Callback& callback,
-        std::unique_ptr<TimerTaskPayload> payload = nullptr,
-        const std::optional<std::chrono::milliseconds>& backoff_timeout = std::nullopt);
+    Result schedule(const std::chrono::milliseconds& timeout, const Callback& callback,
+                                             std::unique_ptr<TimerTaskPayload> payload = nullptr,
+                                             std::int64_t backoff_timeout_in_ms = 0);
 
     private:
     EpollTimer& m_epoll_timer;

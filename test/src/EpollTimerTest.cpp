@@ -1,6 +1,8 @@
 #include <EpollTimer.hpp>
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <memory>
 #include <random>
 #include <thread>
 #include <vector>
@@ -63,7 +65,8 @@ TEST(EpollTimerTest, BasicSingleTask)
     sia::epoll::timer::EpollTimer timer;
     sia::epoll::timer::EpollTimerScheduler scheduler{timer};
 
-    EXPECT_TRUE(scheduler.schedule(std::chrono::seconds{1}, callback_on_timer, std::move(payload)).second != nullptr);
+    EXPECT_TRUE(scheduler.schedule(std::chrono::seconds{1}, callback_on_timer, std::move(payload)).second !=
+    nullptr);
 
     timer.loopConsumeAll();
 
@@ -163,7 +166,8 @@ TEST(EpollTimerTest, BasicMultipleTaskCancel)
     auto result1 = scheduler.schedule(
         std::chrono::milliseconds{1},
         sia::epoll::timer::Callback{
-            [result3](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason reason)
+            [result3](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason
+            reason)
             {
                 result3.second->cancelTimer();
                 callback_on_timer(task, reason);
@@ -173,7 +177,8 @@ TEST(EpollTimerTest, BasicMultipleTaskCancel)
     auto result2 = scheduler.schedule(
         std::chrono::milliseconds{1},
         sia::epoll::timer::Callback{
-            [result4](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason reason)
+            [result4](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task, sia::epoll::timer::Reason
+            reason)
             {
                 result4.second->cancelTimer();
                 callback_on_timer(task, reason);
@@ -334,7 +339,8 @@ TEST(EpollTimerTest, BasicMultipleTaskTimeoutValidation)
 
         // auto timeout = generateRandomNumber();
         std::int32_t timeout = 10;
-        auto result = scheduler.schedule(std::chrono::milliseconds{timeout}, callback_on_timer, std::move(payload), 0);
+        auto result = scheduler.schedule(std::chrono::milliseconds{timeout}, callback_on_timer, std::move(payload),
+        0);
 
         EXPECT_TRUE(result.first == sia::epoll::timer::Status::kSuccess);
         EXPECT_TRUE(result.second != nullptr);
@@ -371,4 +377,81 @@ TEST(EpollTimerTest, BasicMultipleTaskTimeoutValidation)
 
         delete data.m_test_data;
     }
+}
+
+TEST(EpollTimerTest, BasicScheduleMultipleTasksInTimerCallback)
+{
+    sia::epoll::timer::EpollTimer timer;
+    sia::epoll::timer::EpollTimerScheduler scheduler{timer};
+
+    TestData* test_data1 = new TestData;
+    TestData* test_data2 = new TestData;
+
+    test_data1->m_execution_counter = 1;
+    test_data2->m_execution_counter = 1;
+
+    sia::epoll::timer::Callback callback_on_timer_schedule_tasks{
+        [&scheduler, test_data1, test_data2](const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>& task,
+                                             sia::epoll::timer::Reason reason)
+        {
+            EXPECT_TRUE(reason == sia::epoll::timer::Reason::kExpire);
+
+            auto payload = std::move(task->getPayload());
+            std::unique_ptr<TestPayload> test_payload{nullptr};
+
+            if (payload != nullptr)
+            {
+                test_payload.reset(std::move(static_cast<TestPayload*>(payload.release())));
+            }
+
+            if (test_payload != nullptr)
+            {
+                test_payload->m_test_data->m_timedout = std::chrono::steady_clock::now();
+                test_payload->m_test_data->m_execution_counter--;
+            }
+
+            auto payload1 = std::make_unique<TestPayload>();
+            auto payload2 = std::make_unique<TestPayload>();
+
+            payload1->m_test_data = test_data1;
+            payload2->m_test_data = test_data2;
+
+            sia::epoll::timer::Result result1 =
+                scheduler.schedule(std::chrono::milliseconds{100}, callback_on_timer, std::move(payload1), 0);
+
+            sia::epoll::timer::Result result2 =
+                scheduler.schedule(std::chrono::milliseconds{101}, callback_on_timer, std::move(payload2), 0);
+
+            EXPECT_TRUE(result1.first == sia::epoll::timer::Status::kSuccess);
+            EXPECT_TRUE(result1.second != nullptr);
+
+            EXPECT_TRUE(result2.first == sia::epoll::timer::Status::kSuccess);
+            EXPECT_TRUE(result2.second != nullptr);
+        }};
+
+    TestData* test_data = new TestData;
+    test_data->m_execution_counter = 1;
+    auto payload = std::make_unique<TestPayload>();
+    payload->m_test_data = test_data;
+
+    sia::epoll::timer::Result result =
+        scheduler.schedule(std::chrono::milliseconds{100}, callback_on_timer_schedule_tasks, std::move(payload), 0);
+
+    EXPECT_TRUE(result.first == sia::epoll::timer::Status::kSuccess);
+    EXPECT_TRUE(result.second != nullptr);
+
+    timer.loopConsumeAll();
+
+    EXPECT_TRUE(test_data->m_timedout.has_value());
+    EXPECT_EQ(test_data->m_execution_counter, 0);
+
+    EXPECT_TRUE(test_data1->m_timedout.has_value());
+    EXPECT_EQ(test_data1->m_execution_counter, 0);
+
+    EXPECT_TRUE(test_data2->m_timedout.has_value());
+    EXPECT_EQ(test_data2->m_execution_counter, 0);
+
+    // Check if first timer (100ms) expired before the second timer (101ms).
+    //
+    EXPECT_TRUE(test_data1->m_timedout.value() <= test_data2->m_timedout.value());
 }

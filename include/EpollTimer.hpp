@@ -35,6 +35,13 @@ struct TimerTaskPayload
     virtual ~TimerTaskPayload() = default;
 };
 
+/**
+ * @brief A proxy object referring to a scheduled timer task. Any operation on a timer task must be
+ * performed using this proxy object.
+ *
+ * Proxy objects are thread-safe on operations which involve the underlying timer task. For example,
+ * proxy objects can cancel any timer at any time if the timer task is still valid.
+ */
 struct TimerTaskProxy final
 {
     explicit TimerTaskProxy(TimerTask* task) : m_task(task)
@@ -208,18 +215,19 @@ struct EpollTimer
     EpollTimer& operator=(EpollTimer&&) = delete;
 
     Status addTimerTask(TimerTask* timer_task);
-    void processTimers();
-    void removeTimerTask(TimerTask* timer_task);
-    void updateTimerFD();
-    void loopLogic();
     void loop();
     void loopConsumeAll();
     void breakLoop();
-    void movePendingTimers();
     void clearPipe();
 
     private:
     using IntrusiveSet = MemberMultiset;
+
+    void loopLogic();
+    void processTimers();
+    void removeTimerTask(TimerTask* timer_task);
+    void updateTimerFD();
+    void movePendingTimers();
 
     std::int32_t m_epoll_fd;
     std::int32_t m_timer_fd;
@@ -234,23 +242,77 @@ struct EpollTimer
 
 using Result = std::pair<Status, std::shared_ptr<TimerTaskProxy>>;
 
+/**
+ * @brief Schedules the timers safely. Clients must use this class instead of directly accessing the EpollTimer.
+ */
 struct EpollTimerScheduler final
 {
     explicit EpollTimerScheduler(EpollTimer& epoll_timer) : m_epoll_timer{epoll_timer}
     {
     }
 
+    /**
+     * @brief Schedules the desired timer with the given constraints safely.
+     *
+     * @param time_point The timepoint at where this timer must timeout.
+     * @param callback The callback which is invoked on timeout.
+     * @param payload Optional payload to be passed through the callback.
+     * @param backoff_timeout_in_ms Controls the behavior on failure. The behavior depends on the following constraints:
+     * if backoff_timeout_in_ms is negative then this method tries to schedule the timer and returns the result
+     * immediately. if backoff_timeout_in_ms is zero then this method tries to schedule the timer if the status is
+     * kTryAgain. Otherwise returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule the
+     * timer until the backoff timeout point.
+     *
+     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status which refers if the schedule
+     * was failed or success.
+     *
+     * If the schedule as successfully then proxy object is not nullptr. Othetwise the proxy object is nullptr and the
+     * status refers to the failure.
+     */
     Result schedule(const TimerTask::TimePoint& time_point, const Callback& callback,
-                                             std::unique_ptr<TimerTaskPayload> payload = nullptr,
-                                             std::int64_t backoff_timeout_in_ms = 0);
+                    std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
+    /**
+     * @brief Schedules the desired timer with the given constraints safely.
+     *
+     * @param timeout The desired timeout in seconds that this timer must timeout.
+     * @param callback The callback which is invoked on timeout.
+     * @param payload Optional payload to be passed through the callback.
+     * @param backoff_timeout_in_ms Controls the behavior on failure. The behavior depends on the following constraints:
+     * if backoff_timeout_in_ms is negative then this method tries to schedule the timer and returns the result
+     * immediately. if backoff_timeout_in_ms is zero then this method tries to schedule the timer if the status is
+     * kTryAgain. Otherwise returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule the
+     * timer until the backoff timeout point.
+     *
+     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status which refers if the schedule
+     * was failed or success.
+     *
+     * If the schedule as successfully then proxy object is not nullptr. Othetwise the proxy object is nullptr and the
+     * status refers to the failure.
+     */
     Result schedule(const std::chrono::seconds& timeout, const Callback& callback,
-                                             std::unique_ptr<TimerTaskPayload> payload = nullptr,
-                                             std::int64_t backoff_timeout_in_ms = 0);
+                    std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
+    /**
+     * @brief Schedules the desired timer with the given constraints safely.
+     *
+     * @param timeout The desired timeout in milliseconds that this timer must timeout.
+     * @param callback The callback which is invoked on timeout.
+     * @param payload Optional payload to be passed through the callback.
+     * @param backoff_timeout_in_ms Controls the behavior on failure. The behavior depends on the following constraints:
+     * if backoff_timeout_in_ms is negative then this method tries to schedule the timer and returns the result
+     * immediately. if backoff_timeout_in_ms is zero then this method tries to schedule the timer if the status is
+     * kTryAgain. Otherwise returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule the
+     * timer until the backoff timeout point.
+     *
+     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status which refers if the schedule
+     * was failed or success.
+     *
+     * If the schedule as successfully then proxy object is not nullptr. Othetwise the proxy object is nullptr and the
+     * status refers to the failure.
+     */
     Result schedule(const std::chrono::milliseconds& timeout, const Callback& callback,
-                                             std::unique_ptr<TimerTaskPayload> payload = nullptr,
-                                             std::int64_t backoff_timeout_in_ms = 0);
+                    std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
     private:
     EpollTimer& m_epoll_timer;

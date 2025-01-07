@@ -44,6 +44,7 @@ struct TimerTaskPayload
  */
 struct TimerTaskProxy final
 {
+    public:
     explicit TimerTaskProxy(TimerTask* task) : m_task(task)
     {
     }
@@ -53,13 +54,32 @@ struct TimerTaskProxy final
     {
     }
 
+    public:
+    /**
+     * @brief Cancels the underlying task.
+     * @note Note that the cancellation is just a desire. The timer might have been already expired
+     * or canceled or deleted from the memory. However, in any case, calling this method is thread-safe.
+     * Moreover, once the timer is canceled the cancel callback can be executed randomly. So do not assume
+     * The cancel callback will be called immediately.
+     *
+     * @return Returns true if the cancellation is successful otherwise false. Cancelling already cancelled
+     * timers do not take any action and this method returns true.
+     */
     bool cancelTimer() noexcept;
 
+    /**
+     * @brief Returns the payload data attached to the underlying timer task.
+     * @return A reference to the unique pointer of the attached payload data.
+     */
     std::unique_ptr<TimerTaskPayload>& getPayload()
     {
         return m_payload;
     }
 
+    /**
+     * @brief Returns the associated expiration time point.
+     * @return An optional value of time point.
+     */
     std::optional<std::chrono::steady_clock::time_point> getExpiration();
 
     friend struct EpollTimer;
@@ -204,6 +224,9 @@ using MemberOption =
     boost::intrusive::member_hook<TimerTask, boost::intrusive::set_member_hook<>, &TimerTask::m_member_hook>;
 using MemberMultiset = boost::intrusive::multiset<TimerTask, MemberOption>;
 
+/**
+ * @brief Epoll based timer object which manages all the scheduled timer tasks in an intrusive container.
+ */
 struct EpollTimer
 {
     EpollTimer();
@@ -214,20 +237,39 @@ struct EpollTimer
     EpollTimer& operator=(const EpollTimer&) = delete;
     EpollTimer& operator=(EpollTimer&&) = delete;
 
-    Status addTimerTask(TimerTask* timer_task);
+    /**
+     * @brief Starts the main loop on the timer object. This method should be invoked from dedicated threads.
+     *
+     * @note The loop can be broken by breakLoop() method.
+     */
     void loop();
+
+    /**
+     * @brief Executes one-shot loop till all the timer objects are consumed pending to be expired.
+     */
     void loopConsumeAll();
+
+    /**
+     * @brief Breaks the main loop.
+     */
     void breakLoop();
+
+    /**
+     * @brief Clears newly-item-added pipe. This method should be called from test codes only.
+     */
     void clearPipe();
 
     private:
     using IntrusiveSet = MemberMultiset;
 
+    friend struct EpollTimerScheduler;
+
     void loopLogic();
     void processTimers();
-    void removeTimerTask(TimerTask* timer_task);
     void updateTimerFD();
     void movePendingTimers();
+    void removeTimerTask(TimerTask* timer_task);
+    Status addTimerTask(TimerTask* timer_task);
 
     std::int32_t m_epoll_fd;
     std::int32_t m_timer_fd;
@@ -252,64 +294,64 @@ struct EpollTimerScheduler final
     }
 
     /**
-     * @brief Schedules the desired timer with the given constraints safely.
+     * @brief Schedules the desired timer safely with the given constraints.
      *
-     * @param time_point The timepoint at where this timer must timeout.
+     * @param time_point The time point at which this timer must timeout.
      * @param callback The callback which is invoked on timeout.
      * @param payload Optional payload to be passed through the callback.
-     * @param backoff_timeout_in_ms Controls the behavior on failure. The behavior depends on the following constraints:
+     * @param backoff_timeout_in_ms Controls the behavior of failure. The behavior depends on the following constraints:
      * if backoff_timeout_in_ms is negative then this method tries to schedule the timer and returns the result
      * immediately. if backoff_timeout_in_ms is zero then this method tries to schedule the timer if the status is
-     * kTryAgain. Otherwise returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule the
-     * timer until the backoff timeout point.
+     * kTryAgain. Otherwise, it returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule
+     * the timer until the backoff timeout point.
      *
-     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status which refers if the schedule
-     * was failed or success.
+     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status that refers to the schedule
+     * was failed or successful.
      *
-     * If the schedule as successfully then proxy object is not nullptr. Othetwise the proxy object is nullptr and the
-     * status refers to the failure.
+     * If the schedule is successful then the proxy object is not nullptr. Otherwise, the proxy object is nullptr, and
+     * the status refers to the failure.
      */
     Result schedule(const TimerTask::TimePoint& time_point, const Callback& callback,
                     std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
     /**
-     * @brief Schedules the desired timer with the given constraints safely.
+     * @brief Schedules the desired timer safely with the given constraints.
      *
      * @param timeout The desired timeout in seconds that this timer must timeout.
      * @param callback The callback which is invoked on timeout.
      * @param payload Optional payload to be passed through the callback.
-     * @param backoff_timeout_in_ms Controls the behavior on failure. The behavior depends on the following constraints:
+     * @param backoff_timeout_in_ms Controls the behavior of failure. The behavior depends on the following constraints:
      * if backoff_timeout_in_ms is negative then this method tries to schedule the timer and returns the result
      * immediately. if backoff_timeout_in_ms is zero then this method tries to schedule the timer if the status is
-     * kTryAgain. Otherwise returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule the
-     * timer until the backoff timeout point.
+     * kTryAgain. Otherwise, it returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule
+     * the timer until the backoff timeout point.
      *
-     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status which refers if the schedule
-     * was failed or success.
+     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status that refers to the schedule
+     * was failed or successful.
      *
-     * If the schedule as successfully then proxy object is not nullptr. Othetwise the proxy object is nullptr and the
-     * status refers to the failure.
+     * If the schedule is successful then the proxy object is not nullptr. Otherwise, the proxy object is nullptr, and
+     * the status refers to the failure.
      */
     Result schedule(const std::chrono::seconds& timeout, const Callback& callback,
                     std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
     /**
-     * @brief Schedules the desired timer with the given constraints safely.
+     * @brief Schedules the desired timer safely with the given constraints.
      *
      * @param timeout The desired timeout in milliseconds that this timer must timeout.
      * @param callback The callback which is invoked on timeout.
      * @param payload Optional payload to be passed through the callback.
-     * @param backoff_timeout_in_ms Controls the behavior on failure. The behavior depends on the following constraints:
+     * @param backoff_timeout_in_ms Controls the behavior of failure. The behavior depends on the following constraints:
      * if backoff_timeout_in_ms is negative then this method tries to schedule the timer and returns the result
      * immediately. if backoff_timeout_in_ms is zero then this method tries to schedule the timer if the status is
-     * kTryAgain. Otherwise returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule the
-     * timer until the backoff timeout point.
+     * kTryAgain. Otherwise, it returns failure. if backoff_timeout_in_ms is positive then this method tries to schedule
+     * the timer until the backoff timeout point.
      *
-     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status which refers if the schedule
-     * was failed or success.
+     * @return Returns Result object. This object is a pair of TiemrTaskProxy and a status that refers to the schedule
+     * was failed or successful.
      *
-     * If the schedule as successfully then proxy object is not nullptr. Othetwise the proxy object is nullptr and the
-     * status refers to the failure.
+     * If the schedule is successful then the proxy object is not nullptr. Otherwise, the proxy object is nullptr, and
+     * the status refers to the failure.
      */
     Result schedule(const std::chrono::milliseconds& timeout, const Callback& callback,
                     std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);

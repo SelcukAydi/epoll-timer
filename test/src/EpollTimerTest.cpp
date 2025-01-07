@@ -455,3 +455,14 @@ TEST(EpollTimerTest, BasicScheduleMultipleTasksInTimerCallback)
     //
     EXPECT_TRUE(test_data1->m_timedout.value() <= test_data2->m_timedout.value());
 }
+
+TEST(EpollTimerTest, Work)
+{
+    using sia::epoll::timer::Callback;
+    using sia::epoll::timer::EpollTimer;
+    using sia::epoll::timer::TimerTaskProxy;
+    using sia::epoll::timer::EpollTimerScheduler;
+
+    EpollTimer timer;
+    EpollTimerScheduler scheduler{timer};
+}

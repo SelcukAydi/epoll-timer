@@ -6,8 +6,6 @@ set(WARNING_FLAGS "-Wno-unused-variable -Wno-unused-parameter")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${WARNING_FLAGS} -std=c++17")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# set(CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/installed)
-
 if(CMAKE_INSTALL_PREFIX)
     message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 endif()
@@ -51,13 +49,13 @@ install(
   DESTINATION
     include
   COMPONENT
-    Devel
+    timer
 )
 
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/EpollTimer/EpollTimerConfigVersion.cmake"
-    DESTINATION lib/cmake/ClimbingStats
-    COMPONENT Devel
+    DESTINATION lib/cmake/EpollTimer
+    COMPONENT timer
 )
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Util.cmake)

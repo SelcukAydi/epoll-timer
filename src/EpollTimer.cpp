@@ -422,7 +422,7 @@ void EpollTimer::clearPipe()
     }
 }
 
-Result EpollTimerScheduler::schedule(const TimerTask::TimePoint& time_point, const Callback& callback,
+Result EpollTimerScheduler::schedule(const TimerTask::TimePoint& time_point, const TimerTask::CBType& callback,
                                      std::unique_ptr<TimerTaskPayload> payload, std::int64_t backoff_timeout_in_ms)
 {
     TimerTask* task = new TimerTask(time_point, callback, std::move(payload));
@@ -486,14 +486,14 @@ Result EpollTimerScheduler::schedule(const TimerTask::TimePoint& time_point, con
     return {status, nullptr};
 }
 
-Result EpollTimerScheduler::schedule(const std::chrono::seconds& timeout, const Callback& callback,
+Result EpollTimerScheduler::schedule(const std::chrono::seconds& timeout, const TimerTask::CBType& callback,
                                      std::unique_ptr<TimerTaskPayload> payload, std::int64_t backoff_timeout_in_ms)
 {
     TimerTask::TimePoint scheduled_timeout{std::chrono::steady_clock::now() + timeout};
     return schedule(scheduled_timeout, callback, std::move(payload), backoff_timeout_in_ms);
 }
 
-Result EpollTimerScheduler::schedule(const std::chrono::milliseconds& timeout, const Callback& callback,
+Result EpollTimerScheduler::schedule(const std::chrono::milliseconds& timeout, const TimerTask::CBType& callback,
                                      std::unique_ptr<TimerTaskPayload> payload, std::int64_t backoff_timeout_in_ms)
 {
     TimerTask::TimePoint scheduled_timeout{std::chrono::steady_clock::now() + timeout};

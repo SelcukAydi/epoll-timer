@@ -48,14 +48,14 @@ install(
     "${CMAKE_CURRENT_BINARY_DIR}/epolltimer_export.h"
   DESTINATION
     include
-  COMPONENT
-    timer
+#   COMPONENT
+#     timer
 )
 
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/EpollTimer/EpollTimerConfigVersion.cmake"
     DESTINATION lib/cmake/EpollTimer
-    COMPONENT timer
+    # COMPONENT timer
 )
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Util.cmake)

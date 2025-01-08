@@ -98,35 +98,18 @@ struct TimerTaskProxy final
     std::unique_ptr<TimerTaskPayload> m_payload{nullptr};
 };
 
-struct Callback final
-{
-    using CBType = std::function<void(const std::shared_ptr<TimerTaskProxy>& task, Reason reason)>;
-
-    explicit Callback(const CBType& cb) : m_cb(cb)
-    {
-    }
-
-    void operator()(const std::shared_ptr<TimerTaskProxy>& task, Reason reason)
-    {
-        m_cb(task, reason);
-    }
-
-    private:
-    const CBType m_cb;
-};
-
 struct TimerTask : public boost::intrusive::set_base_hook<boost::intrusive::optimize_size<true>>
 {
     using TimePoint = std::chrono::steady_clock::time_point;
+    using CBType = std::function<void(const std::shared_ptr<TimerTaskProxy>& task, Reason reason)>;
 
-    explicit TimerTask(const TimePoint& time_point, const Callback& callback)
-        : m_expiration(time_point), m_callback(callback)
+    explicit TimerTask(const TimePoint& time_point, const CBType& callback) : m_expiration(time_point), m_cb(callback)
     {
         m_proxy = std::make_shared<TimerTaskProxy>(this);
     }
 
-    explicit TimerTask(const TimePoint& time_point, const Callback& callback, std::unique_ptr<TimerTaskPayload> payload)
-        : m_expiration(time_point), m_callback(callback)
+    explicit TimerTask(const TimePoint& time_point, const CBType& callback, std::unique_ptr<TimerTaskPayload> payload)
+        : m_expiration(time_point), m_cb(callback)
     {
         m_proxy = std::make_shared<TimerTaskProxy>(this, std::move(payload));
     }
@@ -165,7 +148,8 @@ struct TimerTask : public boost::intrusive::set_base_hook<boost::intrusive::opti
 
     void invokeCallback(Reason reason)
     {
-        m_callback(getProxy(), reason);
+        // m_callback(getProxy(), reason);
+        m_cb(getProxy(), reason);
     }
 
     std::shared_ptr<TimerTaskProxy> getProxy() const noexcept
@@ -177,7 +161,7 @@ struct TimerTask : public boost::intrusive::set_base_hook<boost::intrusive::opti
     std::atomic_bool m_is_active{true};
     const TimePoint m_expiration;
     std::shared_ptr<TimerTaskProxy> m_proxy;
-    Callback m_callback;
+    CBType m_cb;
 
     public:
     boost::intrusive::set_member_hook<> m_member_hook;
@@ -311,7 +295,7 @@ struct EpollTimerScheduler final
      * If the schedule is successful then the proxy object is not nullptr. Otherwise, the proxy object is nullptr, and
      * the status refers to the failure.
      */
-    Result schedule(const TimerTask::TimePoint& time_point, const Callback& callback,
+    Result schedule(const TimerTask::TimePoint& time_point, const TimerTask::CBType& callback,
                     std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
     /**
@@ -332,7 +316,7 @@ struct EpollTimerScheduler final
      * If the schedule is successful then the proxy object is not nullptr. Otherwise, the proxy object is nullptr, and
      * the status refers to the failure.
      */
-    Result schedule(const std::chrono::seconds& timeout, const Callback& callback,
+    Result schedule(const std::chrono::seconds& timeout, const TimerTask::CBType& callback,
                     std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
     /**
@@ -353,11 +337,16 @@ struct EpollTimerScheduler final
      * If the schedule is successful then the proxy object is not nullptr. Otherwise, the proxy object is nullptr, and
      * the status refers to the failure.
      */
-    Result schedule(const std::chrono::milliseconds& timeout, const Callback& callback,
+    Result schedule(const std::chrono::milliseconds& timeout, const TimerTask::CBType& callback,
                     std::unique_ptr<TimerTaskPayload> payload = nullptr, std::int64_t backoff_timeout_in_ms = 0);
 
     private:
     EpollTimer& m_epoll_timer;
 };
+
+#define EPOLL_TIMER_CALLBACK_PARAMS \
+    const std::shared_ptr<sia::epoll::timer::TimerTaskProxy>&task, sia::epoll::timer::Reason reason
+
+#define EPOLL_TIMER_CALLBACK_GENERATOR(...) [__VA_ARGS__](EPOLL_TIMER_CALLBACK_PARAMS)
 
 }  // namespace sia::epoll::timer

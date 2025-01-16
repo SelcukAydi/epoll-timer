@@ -6,11 +6,14 @@ set(WARNING_FLAGS "-Wno-unused-variable -Wno-unused-parameter")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${WARNING_FLAGS} -std=c++17")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(CMAKE_BUILD_TYPE Release)
+
 if(CMAKE_INSTALL_PREFIX)
     message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 endif()
     
 option(ENABLE_TEST "Enables UT." OFF)
+option(ENABLE_BENCHMARK "Enables benchmarks EpollTimer vs Folly" OFF)
 
 message(STATUS "UT tests:${ENABLE_TEST}")
 
@@ -64,4 +67,8 @@ CreateConfigPackageFile(EpollTimer sia::epoll)
 
 if(ENABLE_TEST)
     add_subdirectory(test)
+endif()
+
+if(ENABLE_BENCHMARK)
+    add_subdirectory(benchmark)
 endif()
